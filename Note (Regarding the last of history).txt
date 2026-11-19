@@ -1,0 +1,4 @@
+Name: Chloe Ng
+Student ID: 20911931
+
+Due to the fact that I was added to the repository late, thus, 25% of my code had already been generated in visual studio code, causing the history to start from 100++ lines 
