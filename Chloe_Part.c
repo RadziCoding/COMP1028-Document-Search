@@ -281,16 +281,58 @@ static void clear_last_result (void) {
         Query, Ranking, & Display 
    ------------------------------------- */
 
+// Splits the query into unique, valid search terms
 static int parse_query (const char *query, char terms[][MAX_WORD]) {
-        
+        int unique_count = 0;
+        const char *cursor = query;
+        char current_word[MAX_WORD];
+
+        while (next_token (&cursor, current_word)) {
+                // Skip common filler words if stopword filtering is enabled
+                if (use_stopwords && is_stopword (current_word)) {
+                        continue;
+                }
+                // Add the unique word if there is still room in the array
+                if (unique_count < MAX_QUERY_TERMS) {
+                        strcpy (terms[unique_count], current_word);
+                        unique_count++;
+                }
+        }
+        return unique_count;
 }
 
+// Sorts results: Highest score first, then lowest document ID first
 static int cmp_result (const void *a, const void *b) {
+/* Return code: 
+            -1 = 'first' comes before 'second'
+            1 = 'second' comes before 'first'
+                    */
+        const Result *first = (const Result *)a;
+        const Result *second = (const Result *)b;
+        
+        if (first -> score > second -> score) {
+                return -1;
+        }
+        if (first -> score < second -> score) {
+                return 1;
+        }
 
+        // Scores are equal: break the tie using document ID (Smaller ID first)
+        return first -> doc_id - second -> doc_id;
 }
 
-static double term_score (int tf, int df) {
+// Calculates the relevance score for a single word in a document
+static double term_score (int term_freq, int doc_freq) {
 
+        // Mode 2: Term Frequency-Inverse Document Frequency (TF-IDF)
+        if (scoring_mode == 2) {
+                double tf_weight = 1.0 + log((double)term_freq);
+                double idf_weight = log(1.0 + (double)collect.count / (double)doc_freq);
+                return tf_weight * idf_weight;
+        }
+
+        // Mode 1 (Default): Simple raw term frequency
+        return (double)term_freq;
 }
 
 static Result *finalise_results (double *scores, unsigned long *masks, int *count) {
