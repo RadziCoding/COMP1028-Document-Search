@@ -3,6 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <stdbool.h>
 #include <time.h>   // FOR: Benchmark indexing and query execution speeds (latency) and track document timestamps.
 #include <dirent.h> // FOR: Opening and traversing directories to automatically discover and index local text files without hardcoding file paths.
 
@@ -93,6 +94,15 @@ static const char *STOPWORDS[] = {"a", "an", "the", "and", "or",
 /* ------------------------
         Helper Methods 
    ------------------------ */
+// To check if a word is already in the terms array
+static bool is_duplicate (const char *word, char terms[][MAX_WORD], int count) {
+        for (int i = 0; i < count; i++) {
+                if (strcmp(terms[i], word) == 0) {
+                        return true;
+                }
+        }
+        return false;
+}
 
 /* ------------------------
         Inverted Index 
@@ -272,7 +282,7 @@ static void clear_last_result (void) {
    ------------------------------------- */
 
 static int parse_query (const char *query, char terms[][MAX_WORD]) {
-
+        
 }
 
 static int cmp_result (const void *a, const void *b) {
@@ -299,6 +309,55 @@ static void print_results (FILE *out, char terms[][MAX_WORD], int nterms, Result
 
 }
 
+// Handles user input, runs the seaarch, times it, and saves the resultsfor reporting
 static void do_search (void) {
+        
+        // Make sure the search index is ready before seaarching
+        if (!index_built) {
+                printf ("Build or load the index first. \n");
+                return;
+        }
+        // Read the search query from the user 
+        char raw_query[LINE_LEN];
+        if (!read_line ("Enter search query: ", raw_query, sizeof(raw_query))) {
+                return;
+        }
+        // Clean and split the query into unique search terms
+        char query_terms[MAX_QUERY_TERMS][MAX_WORD];
+        int term_count = parse_query(raw_query, query_terms);
 
+        if (term_count == 0) {
+                printf ("Query is empty (or contains only stopwords/punctuation). \n");
+                return;
+        }
+
+        // Display the cleaned search terms
+        printf ("Normalised query terms: ");
+        for (int i = 0; i < term_count; i++) {
+                printf (" %s", query_terms[i]);
+        }
+        printf ("\n");
+
+        // Run the search and measure how long it takes in miliseconds
+        clock_t start_time = clock();
+        int result_count = 0;
+        Result *search_result = search_index (query_terms, term_count, &result_count);
+        clock_t end_time = clock();
+
+        double elapsed_ms = 1000.0 * (double)(end_time - start_time) / CLOCK_PER_SEC;
+
+        // Print the top results and the search duration
+        print_results (stdout, query_terms, term_count, search_results, result_count, max_search_results);
+        printf ("Search time: %.4f ms\n", elapsed_ms);
+
+        // Save the results and query details in case the user generates a report later
+        free (last_results);
+        last_results = search_results;
+        last_count = result_count;
+        last_nterms = term_count;
+
+        for (int i = 0; i < term_count; i++) {
+                strcpy (last_terms[i], query_terms [i]);
+        }
+        snprintf (last_query, sizeof(last_query), "%s", raw_query);
 }
