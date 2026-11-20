@@ -104,6 +104,38 @@ static bool is_duplicate (const char *word, char terms[][MAX_WORD], int count) {
         return false;
 }
 
+// Memory allocation
+static int alloc_track_arrays (double **scores, unsogned long **masks) {
+/* Return code: 
+            0 = Failed
+            1 = Success
+                    */
+        *scores = calloc((size_t)collection.count, sizeof(**scores));
+        *masks = calloc((size_t)collection.count, sizeof(**masks));
+
+        if (!*score || !*masks) {
+                free (*scores);
+                free (*masks);
+                return 0;
+        }
+        return 1;
+}
+
+// Counts matching query words inside a single document's text
+static void score_document_text (const char *text, int doc_id, char terms[][MAX_WORD], int nterms, double *scores, unisgned long *masks) {
+        const char *cursor = text;
+        char word[MAX_WORD];
+
+        while (next_token(&cursor, word)) {
+                for (int term_index = 0; term_index < nterms; term_index++) {
+                        if (strcmp (word, terms[term_index]) == 0) {
+                                scores[doc_id] += 1.0;
+                                masks[doc_id] |= (1UL << term_index);
+                        }
+                }
+        } 
+}
+
 /* ------------------------
         Inverted Index 
    ------------------------ */
@@ -335,20 +367,146 @@ static double term_score (int term_freq, int doc_freq) {
         return (double)term_freq;
 }
 
+// Result Aggregation & Sorting
+// Converts raw score/mask arrays into a compact, sorted array of matched documents
 static Result *finalise_results (double *scores, unsigned long *masks, int *count) {
 
+        // Count how many documents matched at least one query term
+        int matched_count = 0;
+        for (int i = 0; i < collection.count; i++) {
+                if (masks[i] != 0) {
+                        matched_count++;
+                }
+        }
+
+        *count = matched_count;
+        if (matched_count == 0) {
+                return NULL;
+        }
+
+        // Allocate memory only for the matched documents
+        Result *results = malloc ((size_t)matched_count * sizeof (*results));
+        if (!results) {
+                *count = 0;
+                return NULL;
+        }
+
+        // Populate the compact results array
+        int result_index = 0;
+        for (int i = 0; i < collection.count; i++) {
+                if (masks[i] != 0) {
+                        results[results_index].doc_id = i;
+                        results[result_index].score = score[i];
+                        results[result_index].mask = masks[i];
+                        result_index++;
+                }
+        }
+
+        // Sort results by relevance score
+        qsort (results, (size_t)matched_count, sizeof(*results), cmp_result);
+        return results;
 }
 
+// Inverted Index Search (Fast Retrieval)
+// Looks up only the posting lists of the query terms
 static Result *search_index (char terms[][MAX_WORD], int nterms, int *count) {
 
+        // Allocate temporary tracking arrays for all documents
+        double *scores = NULL;
+        unsigned long *masks = NULL;
+
+        if (!alloc_track_arrays (&scores, &masks)) {
+                *count = 0;
+                return NULL;
+        }
+
+        // Look up each search term in the index
+        for (int term_index = 0; term_index < nterms; term_index++) {
+                Term *term = find_term(terms[term_index]);
+                if (!term) {
+                        continue;
+                }
+
+                // Update scores for every document containing this term
+                for (Posting *p = term -> head; p != NULL; p = p -> next) {
+                        scores[p -> doc_id] += term_score (p -> freq, term -> doc_freq);
+                        // Set the i=th bit in this document's bitmask to track which query terms it contains
+                        masks[p -> doc_id] |= (1UL << i);        // Mark that term 'i' matched
+                }
+        }
+
+        // Package, sort, and clean up
+        Result *results = finalise_results (scores, masks, count);
+        free (scores);
+        free (masks);
+
+        return results;
 }
 
+// Linear scan search (Benchmarking baseline)
+// Re-reads and re-tokenises every document from disk for every query
 static Result *search linear (char terms[][MAX_WORD], int nterms, int *count) {
 
+        // Allocate temporary tracking arrays for all documents
+        double *scores = NULL;
+        unsigned long *masks = NULL;
+
+        if (!alloc_track_arrays (&scores, &masks)) {
+                *count = 0;
+                return NULL;
+        }
+
+        // Read every file from disk and check its words
+        for (int doc_id = 0; doc_id < collection.count; doc_id++) {
+                char *file_text = read_file (collection.docs[doc_id].path, NULL);
+                if (!file_text) {
+                        continue;
+                }
+
+                score_document_text (file_text, doc_id, terms, nterms, scores, masks);
+                free (file_text);
+        }
+
+        // Package, sort, and clean up
+        Result *results = finalise_results (scores, masks, count);
+        free (scores);
+        free (masks);
+
+        return results;
 }
 
-static void print_results (FILE *out, char terms[][MAX_WORD], int nterms, Result *r, int count, int k) {
+// Prints a formatted table of the top matching search results
+// Displays each doc's rank, filename, relevance score, and the specific query terms (capped at the max search results)
+static void print_results (FILE *out, char terms[][MAX_WORD], int nterms, Result *results, int count, int max_search_results) {
 
+        // Handle the case where nothing matched
+        if (count == 0) {
+                fprintf (out, "No documents matched your query. \n");
+                return;
+        }
+
+        // Decide how many results to display (cap at MAX_SEARCH_RESULTS)
+        int num_to_show = count;
+        if (num_to_show > max_search_results) {
+                num_to_show = max_search_results;
+        }
+
+        // Print the summary line and the table headers
+        fprintf (out, "%d matching document(s). Showing top %d:\n", count, num_to_show);
+        fprintf (out, "%-5s %-30s %-10s %s\n", "Rank", "File", "Score", "Matched terms");
+
+        // Print each matching document row by row
+        for (int rank = 0; rank <num_to_show; rank++) {
+                Result result = results[rank];
+                const char *filename = collection.docs[result.doc_id].filename;
+
+                // Print rank, filename, and score
+                fprintf (out, "%-5d %-30.30s %-10.2f", rank + 1, filename, result.score);
+
+                // Print the matched query terms at the end of the row
+                print_matched_terms (out, terms, nterms, result.mask);
+                fprintf (out, "\n");
+        }
 }
 
 // Handles user input, runs the seaarch, times it, and saves the resultsfor reporting
