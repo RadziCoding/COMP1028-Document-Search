@@ -135,7 +135,7 @@ static int alloc_track_arrays (double **scores, uint64_t **masks) {
 }
 
 // Counts matching query words inside a single document's text
-static void score_document_text (const char *text, int doc_id, char terms[][MAX_WORD], int nterms, double *scores, unisgned long *masks) {
+static void score_document_text (const char *text, int doc_id, char terms[][MAX_WORD], int nterms, double *scores, uint64_t *masks) {
         int frequencies[MAX_QUERY_TERMS] = {0};
 
     const char *cursor = text;
@@ -230,6 +230,8 @@ static Term *find_or_create_term (const char *word, int *created) {
                 free (new_term);    // Cleaning up the Term structure before failing
                 return NULL;
         }
+
+        memcpy(new_term -> word, word, length);
 
         // Insert the new Term at the front of its hash bucket's linked list
         unsigned long bucket_index = hash_word(word);
@@ -449,7 +451,7 @@ static Result *finalise_results (double *scores, uint64_t *masks, int *count) {
         int result_index = 0;
         for (int i = 0; i < collect.count; i++) {
                 if (masks[i] != 0) {
-                        results[results_index].doc_id = i;
+                        results[result_index].doc_id = i;
                         results[result_index].score = score[i];
                         results[result_index].mask = masks[i];
                         result_index++;
@@ -606,7 +608,7 @@ static void do_search (void) {
         // Run the search and measure how long it takes in miliseconds
         clock_t start_time = clock();
         int result_count = 0;
-        Result *search_result = search_index (query_terms, term_count, &result_count);
+        Result *search_results = search_index (query_terms, term_count, &result_count);
 
         if (search_results == NULL && result_count == -1) {
                 printf("Error: Memory allocation failed.\n");
