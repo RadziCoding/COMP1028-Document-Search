@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdbool.h>
@@ -63,7 +64,7 @@ Index;
 typedef struct {
     int doc_id;
     double score;
-    unsigned long mask;
+    uint64_t mask;
 }
 Result;
 
@@ -105,35 +106,61 @@ static bool is_duplicate (const char *word, char terms[][MAX_WORD], int count) {
 }
 
 // Memory allocation
-static int alloc_track_arrays (double **scores, unsogned long **masks) {
+static int alloc_track_arrays (double **scores, uint64_t **masks) {
 /* Return code: 
             0 = Failed
             1 = Success
                     */
-        *scores = calloc((size_t)collection.count, sizeof(**scores));
-        *masks = calloc((size_t)collection.count, sizeof(**masks));
+        *scores = NULL;
+        *masks = NULL;
 
-        if (!*score || !*masks) {
-                free (*scores);
-                free (*masks);
-                return 0;
-        }
+    if (collect.count <= 0) {
         return 1;
+    }
+
+    *scores = calloc((size_t)collect.count, sizeof(**scores));
+    *masks = calloc((size_t)collect.count, sizeof(**masks));
+
+    if (*scores == NULL || *masks == NULL) {
+        free(*scores);
+        free(*masks);
+
+        *scores = NULL;
+        *masks = NULL;
+
+        return 0;
+    }
+
+    return 1;
 }
 
 // Counts matching query words inside a single document's text
 static void score_document_text (const char *text, int doc_id, char terms[][MAX_WORD], int nterms, double *scores, unisgned long *masks) {
-        const char *cursor = text;
-        char word[MAX_WORD];
+        int frequencies[MAX_QUERY_TERMS] = {0};
 
-        while (next_token(&cursor, word)) {
-                for (int term_index = 0; term_index < nterms; term_index++) {
-                        if (strcmp (word, terms[term_index]) == 0) {
-                                scores[doc_id] += 1.0;
-                                masks[doc_id] |= (1UL << term_index);
-                        }
-                }
-        } 
+    const char *cursor = text;
+    char word[MAX_WORD];
+
+    while (next_token(&cursor, word)) {
+        for (int i = 0; i < nterms; i++) {
+            if (strcmp(word, terms[i]) == 0) {
+                frequencies[i]++;
+            }
+        }
+    }
+
+    for (int i = 0; i < nterms; i++) {
+        if (frequencies[i] > 0) {
+            Term *term = find_term(terms[i]);
+
+            if (term != NULL) {
+                scores[doc_id] +=
+                    term_score(frequencies[i], term->doc_freq);
+
+                masks[doc_id] |= (UINT64_C(1) << i);
+            }
+        }
+    }
 }
 
 /* ------------------------
@@ -143,7 +170,7 @@ static void score_document_text (const char *text, int doc_id, char terms[][MAX_
 
 // Converts the word into a unique array index
 // So the program knows which hash table bucket to look in
-static unsigned long hash_word (const char *s) {
+static unsigned long hash_word (const char *string) {
         unsigned long hash_value = 5381;     // starting seed from the djb2 algorithm
         while (*string != '\0') {
                 hash_value = hash_value * 33 + (unsigned char) *string++;
@@ -172,7 +199,7 @@ static Term *find_term (const char *word) {
 
 // Looks up a word using find_term and, if it doesn't exist yet, 
 // allocate memory for a new Term entry and adds it to the hash table
-static Term *find_create_term (const char *word, int *created) {
+static Term *find_or_create_term (const char *word, int *created) {
 /* Return code: 
             0 = Tell caller a new term wasn't created
             1 = Tell caller a new term was created
@@ -194,8 +221,11 @@ static Term *find_create_term (const char *word, int *created) {
                 return NULL;   
         }
 
-        // Copy the word string into the new Term
-        new_term -> word = duplic_string (word);
+        // Copy the word string into the new TermS
+        // Allocate memory for the word, including the null terminator
+        size_t length = strlen(word) + 1;
+
+        new_term -> word = malloc(length);
         if (new_term -> word == NULL) {
                 free (new_term);    // Cleaning up the Term structure before failing
                 return NULL;
@@ -215,7 +245,7 @@ static Term *find_create_term (const char *word, int *created) {
 
 // Records that a word appeared in a specific document by either increasing the
 // frequency count on an existing entry or adding a new Posting node to the word's list
-static int add_occurence (Term *t, int doc_id) {
+static int add_occurence (Term *term, int doc_id) {
 /* Return code: 
             -1 = Allocation failure
             0 = Existing posting updated
@@ -283,25 +313,34 @@ static void free_index (void) {
                         current_term = next_term;
                 }
 
+                index.buckets[bucket] = NULL; // Avoid dangling pointer to freed memory
+        }
                 // Reset all index counters and status flags back to zero
                 index.unique_terms = 0;
                 index.total_postings = 0;
                 index.total_terms = 0;
                 index_built = 0;
-        }
 }
 
 // Releases the memory used to store the loaded documents and
 // resets the document collection state
 static void free_collection (void) {
+
+        free_index();
+        clear_last_result();
+        
         free (collect.docs);
+
         collect.docs = NULL;
-        collect.count = collect.capacity = 0;
+        collect.count = 0;
+        collect.capacity = 0;
+        collect.folder[0] = '\0';
 }
 
 // Wipes out the stored search results from the previous query
 // so the program is ready for a fresh search
 static void clear_last_result (void) {
+        
         free (last_results);
         last_results = NULL;
         last_count = 0;
@@ -324,11 +363,16 @@ static int parse_query (const char *query, char terms[][MAX_WORD]) {
                 if (use_stopwords && is_stopword (current_word)) {
                         continue;
                 }
+                if (unique_count >= MAX_QUERY_TERMS) {
+                    break;
+                }
+
+                if (is_duplicate(current_word, terms, unique_count)) {
+                        continue;
+                }
                 // Add the unique word if there is still room in the array
-                if (unique_count < MAX_QUERY_TERMS) {
                         strcpy (terms[unique_count], current_word);
                         unique_count++;
-                }
         }
         return unique_count;
 }
@@ -349,12 +393,22 @@ static int cmp_result (const void *a, const void *b) {
                 return 1;
         }
 
-        // Scores are equal: break the tie using document ID (Smaller ID first)
-        return first -> doc_id - second -> doc_id;
+        if (first->doc_id < second->doc_id) {
+                return -1;
+        }
+
+        if (first->doc_id > second->doc_id) {
+                return 1;
+        }
+        return 0;
 }
 
 // Calculates the relevance score for a single word in a document
 static double term_score (int term_freq, int doc_freq) {
+
+        if (doc_freq <= 0 || collect.count <= 0) {
+                return 0.0;
+        }
 
         // Mode 2: Term Frequency-Inverse Document Frequency (TF-IDF)
         if (scoring_mode == 2) {
@@ -369,11 +423,11 @@ static double term_score (int term_freq, int doc_freq) {
 
 // Result Aggregation & Sorting
 // Converts raw score/mask arrays into a compact, sorted array of matched documents
-static Result *finalise_results (double *scores, unsigned long *masks, int *count) {
+static Result *finalise_results (double *scores, uint64_t *masks, int *count) {
 
         // Count how many documents matched at least one query term
         int matched_count = 0;
-        for (int i = 0; i < collection.count; i++) {
+        for (int i = 0; i < collect.count; i++) {
                 if (masks[i] != 0) {
                         matched_count++;
                 }
@@ -387,13 +441,13 @@ static Result *finalise_results (double *scores, unsigned long *masks, int *coun
         // Allocate memory only for the matched documents
         Result *results = malloc ((size_t)matched_count * sizeof (*results));
         if (!results) {
-                *count = 0;
+                *count = -1;
                 return NULL;
         }
 
         // Populate the compact results array
         int result_index = 0;
-        for (int i = 0; i < collection.count; i++) {
+        for (int i = 0; i < collect.count; i++) {
                 if (masks[i] != 0) {
                         results[results_index].doc_id = i;
                         results[result_index].score = score[i];
@@ -413,10 +467,10 @@ static Result *search_index (char terms[][MAX_WORD], int nterms, int *count) {
 
         // Allocate temporary tracking arrays for all documents
         double *scores = NULL;
-        unsigned long *masks = NULL;
+        uint64_t *masks = NULL;
 
         if (!alloc_track_arrays (&scores, &masks)) {
-                *count = 0;
+                *count = -1;
                 return NULL;
         }
 
@@ -429,9 +483,12 @@ static Result *search_index (char terms[][MAX_WORD], int nterms, int *count) {
 
                 // Update scores for every document containing this term
                 for (Posting *p = term -> head; p != NULL; p = p -> next) {
-                        scores[p -> doc_id] += term_score (p -> freq, term -> doc_freq);
-                        // Set the i=th bit in this document's bitmask to track which query terms it contains
-                        masks[p -> doc_id] |= (1UL << i);        // Mark that term 'i' matched
+                        if (p->doc_id < 0 || p->doc_id >= collect.count) { 
+                                continue;
+                        }
+
+                        scores[p->doc_id] += term_score(p->freq, term->doc_freq);
+                        masks[p->doc_id] |= (UINT64_C(1) << term_index);
                 }
         }
 
@@ -445,20 +502,20 @@ static Result *search_index (char terms[][MAX_WORD], int nterms, int *count) {
 
 // Linear scan search (Benchmarking baseline)
 // Re-reads and re-tokenises every document from disk for every query
-static Result *search linear (char terms[][MAX_WORD], int nterms, int *count) {
+static Result *search_linear (char terms[][MAX_WORD], int nterms, int *count) {
 
         // Allocate temporary tracking arrays for all documents
         double *scores = NULL;
-        unsigned long *masks = NULL;
+        uint64_t *masks = NULL;
 
         if (!alloc_track_arrays (&scores, &masks)) {
-                *count = 0;
+                *count = -1;
                 return NULL;
         }
 
         // Read every file from disk and check its words
-        for (int doc_id = 0; doc_id < collection.count; doc_id++) {
-                char *file_text = read_file (collection.docs[doc_id].path, NULL);
+        for (int doc_id = 0; doc_id < collect.count; doc_id++) {
+                char *file_text = read_file (collect.docs[doc_id].path, NULL);
                 if (!file_text) {
                         continue;
                 }
@@ -498,7 +555,7 @@ static void print_results (FILE *out, char terms[][MAX_WORD], int nterms, Result
         // Print each matching document row by row
         for (int rank = 0; rank <num_to_show; rank++) {
                 Result result = results[rank];
-                const char *filename = collection.docs[result.doc_id].filename;
+                const char *filename = collect.docs[result.doc_id].filename;
 
                 // Print rank, filename, and score
                 fprintf (out, "%-5d %-30.30s %-10.2f", rank + 1, filename, result.score);
@@ -511,6 +568,9 @@ static void print_results (FILE *out, char terms[][MAX_WORD], int nterms, Result
 
 // Handles user input, runs the seaarch, times it, and saves the resultsfor reporting
 static void do_search (void) {
+
+        // Clear previous search results before starting a new search
+        clear_last_result();
         
         // Make sure the search index is ready before seaarching
         if (!index_built) {
@@ -519,9 +579,14 @@ static void do_search (void) {
         }
         // Read the search query from the user 
         char raw_query[LINE_LEN];
-        if (!read_line ("Enter search query: ", raw_query, sizeof(raw_query))) {
+        printf("Enter search query: ");
+
+        if (fgets(raw_query, sizeof(raw_query), stdin) == NULL) {
                 return;
         }
+
+        raw_query[strcspn(raw_query, "\n")] = '\0';
+        
         // Clean and split the query into unique search terms
         char query_terms[MAX_QUERY_TERMS][MAX_WORD];
         int term_count = parse_query(raw_query, query_terms);
@@ -542,6 +607,12 @@ static void do_search (void) {
         clock_t start_time = clock();
         int result_count = 0;
         Result *search_result = search_index (query_terms, term_count, &result_count);
+
+        if (search_results == NULL && result_count == -1) {
+                printf("Error: Memory allocation failed.\n");
+                return;
+        }
+        
         clock_t end_time = clock();
 
         double elapsed_ms = 1000.0 * (double)(end_time - start_time) / CLOCK_PER_SEC;
