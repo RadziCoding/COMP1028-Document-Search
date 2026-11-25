@@ -452,7 +452,7 @@ static Result *finalise_results (double *scores, uint64_t *masks, int *count) {
         for (int i = 0; i < collect.count; i++) {
                 if (masks[i] != 0) {
                         results[result_index].doc_id = i;
-                        results[result_index].score = score[i];
+                        results[result_index].score = scores[i];
                         results[result_index].mask = masks[i];
                         result_index++;
                 }
