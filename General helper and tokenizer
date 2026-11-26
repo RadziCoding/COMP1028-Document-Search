@@ -10,6 +10,8 @@ struct Document
     int id;
     char filename[NAME_LEN];
     char *content;
+    long total_terms;
+    long unique_terms;
 };
 char *read_file(const char *filename);
 void preprocessText(char *content);
