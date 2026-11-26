@@ -1,0 +1,165 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <string.h>
+
+#define NAME_LEN 256
+
+struct Document
+{
+    int id;
+    char filename[NAME_LEN];
+    char *content;
+};
+char *read_file(const char *filename);
+void preprocessText(char *content);
+void tokenizeText(char *content, int documentID);
+int countWords(char *content);
+int loadDocuments(struct Document documents[],const char *filenames[],int numberOfFiles,int capacity,long *totalWords);
+void freeDocuments(struct Document documents[], int totalDocuments);
+
+
+char *read_file(const char *filename)
+{
+    FILE *fp = fopen(filename, "r");
+
+    if (fp == NULL)
+    {
+        printf("Error opening file.\n");
+        return NULL;
+    }
+
+    char *content = malloc(10000);
+
+    if (content == NULL)
+    {
+        fclose(fp);
+        return NULL;
+    }
+
+    size_t length = fread(content, 1, 9999, fp);
+
+    content[length] = '\0';
+
+    fclose(fp);
+
+    return content;
+}
+
+void preprocessText(char *content)
+{
+    for (int i = 0; content[i] != '\0'; i++)
+    {
+        if (isalpha((unsigned char)content[i]))
+        {
+            content[i] = (char)tolower((unsigned char)content[i]);
+        }
+        else
+        {
+            content[i] = ' ';
+        }
+    }
+}
+
+void tokenizeText(char *content, int documentID)
+{
+    char *token = strtok(content, " \t\n\r");
+
+    while (token != NULL)
+    {
+        // Send token to inverted index
+        add_occurence(token, documentID);
+
+        token = strtok(NULL, " \t\n\r");
+    }
+}
+// FUNCTION 1: Count the number of words in a document
+int countWords(char *content)
+{
+    int count = 0;
+    int insideWord = 0;
+
+    for (int i = 0; content[i] != '\0'; i++)
+    {
+        if (isspace((unsigned char)content[i]))
+        {
+            insideWord = 0;
+        }
+        else if (insideWord == 0)
+        {
+            count++;
+            insideWord = 1;
+        }
+    }
+
+    return count;
+}
+
+// FUNCTION 2: Load multiple documents
+int loadDocuments(struct Document documents[],const char *filenames[],int numberOfFiles,int capacity,long *totalWords)
+{
+    int loadedDocuments = 0;
+    *totalWords = 0;
+
+    for (int i = 0; i < numberOfFiles && loadedDocuments < capacity; i++)
+    {
+        // Read one document
+        char *content = read_file((char *)filenames[i]);
+
+        if (content == NULL)
+        {
+            continue;
+        }
+
+        // Store document information
+        documents[loadedDocuments].id = loadedDocuments + 1;
+
+        strcpy(documents[loadedDocuments].filename, filenames[i]);
+
+        documents[loadedDocuments].content = content;
+
+        // Preprocess the document
+        preprocessText(documents[loadedDocuments].content);
+
+        // Count words in this document
+        int words = countWords(documents[loadedDocuments].content);
+
+        *totalWords += words;
+
+        loadedDocuments++;
+
+        printf("Loaded: %s | Words: %d\n", filenames[i], words);
+    }
+
+    return loadedDocuments;
+}
+
+// FUNCTION 3: Validate the document collection
+int validateCollection(int totalDocuments, long totalWords)
+{
+    if (totalDocuments < 50)
+    {
+        printf("Error: Minimum 50 documents required.\n");
+        return 1;
+    }
+
+    if (totalWords < 100000)
+    {
+        printf("Error: Minimum 100000 words required.\n");
+        return 1;
+    }
+
+    printf("Document collection meets requirements!\n");
+
+    return 0;
+}
+
+// FUNCTION 4: Free allocated memory
+void freeDocuments(struct Document documents[], int totalDocuments)
+{
+    for (int i = 0; i < totalDocuments; i++)
+    {
+        free(documents[i].content);
+        documents[i].content = NULL;
+    }
+}
