@@ -1,29 +1,25 @@
 #include <stdio.h>
 
-void mainMenu();
-void option1();
-void option2();
-void option3();
+void print_menu();
 void returnToMenu();
 
-int main()
-{
-    mainMenu();
 
-    return 0;
-}
-
-  void mainMenu()
+void print_Menu()
   {
     int choice;
 
     do
     {
         printf("\n===== MAIN MENU =====\n");
-        printf("1. Search documents\n");
-        printf("2. View inverted index\n");
-        printf("3. Generate statistics report\n");
-        printf("4. Exit\n");
+        printf("1. Search\n");
+        printf("2. View document\n");
+        printf("3. Load collection\n");
+        printf("4. Build index\n");
+        printf("5. Show statistics\n");
+        printf("6. Save results/report\n");
+        printf("7. Settings\n");
+        printf("8. Start benchmark test")
+        printf("9. Exit\n");
         printf("=====================\n");
 
         printf("Enter your choice: ");
@@ -32,47 +28,45 @@ int main()
         switch(choice)
         {
             case 1:
-                option1();
+                do_search();
                 break;
 
             case 2:
-                option2();
+                view_document(); //To be built by Yaish
                 break;
 
             case 3:
-                option3();
+                load_collection();
                 break;
 
             case 4:
-                printf("\nExiting program...\n");
+                build_index();
                 break;
 
+            case 5:
+                show_statistics();
+                break;
+
+            case 6:
+                save_report();
+                break;
+
+            case 7:
+                settings(); //To be built by Yaish
+                break;
+
+            case 8:
+                benchmark(); //To be built by Yaish
+                break;
+
+            case 9:
+                printf("Exiting program");
+            
             default:
-                printf("\nInvalid choice. Try again.\n");
+                printf("\nInvalid choice. Please select the available options from 1-8.\n");
         }
 
-    } while(choice != 4);
-}
-
-void option1()
-{
-    printf("Search for Documents\n");
-    printf("Enter your query:\n");
-    returnToMenu();
-}
-
-void option2()
-{
-    printf("View Inverted Index:\n");
-    printf("Loading.....\n");
-    returnToMenu();
-}
-
-void option3()
-{
-    printf("Generating Statistics Report...\n");
-    printf("Complete!\n");
-    returnToMenu();
+    } while(choice != 9);
 }
 
 void returnToMenu()
